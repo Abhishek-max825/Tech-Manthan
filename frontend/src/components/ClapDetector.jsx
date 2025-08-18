@@ -6,6 +6,9 @@ const ClapDetector = ({ isListening, setIsListening, onClapDetected, onError, di
   const [mediaRecorder, setMediaRecorder] = useState(null)
   const [audioChunks, setAudioChunks] = useState([])
   const [stream, setStream] = useState(null)
+  const [audioLevel, setAudioLevel] = useState(0)
+  const [lastClapScore, setLastClapScore] = useState(null)
+  const [showClapFeedback, setShowClapFeedback] = useState(false)
   const lastClapTime = useRef(0)
   const processingRef = useRef(false)
 
@@ -34,15 +37,33 @@ const ClapDetector = ({ isListening, setIsListening, onClapDetected, onError, di
       try {
         const mediaStream = await navigator.mediaDevices.getUserMedia({ 
           audio: {
-            sampleRate: 16000,
+            sampleRate: 44100,  // Higher sample rate for better quality
             channelCount: 1,
             echoCancellation: false,
             noiseSuppression: false,
-            autoGainControl: false
+            autoGainControl: false,
+            latency: 0.01  // Lower latency for better responsiveness
           } 
         })
         
         setStream(mediaStream)
+        
+        // Add audio level monitoring
+        const audioContext = new AudioContext()
+        const source = audioContext.createMediaStreamSource(mediaStream)
+        const analyser = audioContext.createAnalyser()
+        analyser.fftSize = 256
+        source.connect(analyser)
+        
+        const dataArray = new Uint8Array(analyser.frequencyBinCount)
+        const updateAudioLevel = () => {
+          if (isListening) {
+            analyser.getByteFrequencyData(dataArray)
+            const average = dataArray.reduce((a, b) => a + b) / dataArray.length
+            setAudioLevel(average)
+            requestAnimationFrame(updateAudioLevel)
+          }
+        }
         
         const recorder = new MediaRecorder(mediaStream, {
           mimeType: 'audio/webm;codecs=opus'
@@ -83,7 +104,7 @@ const ClapDetector = ({ isListening, setIsListening, onClapDetected, onError, di
   useEffect(() => {
     if (mediaRecorder && isListening && !disabled) {
       setAudioChunks([])
-      mediaRecorder.start(1000) // Record in 1-second chunks
+      mediaRecorder.start(500) // Record in 0.5-second chunks for more responsive detection
     } else if (mediaRecorder && mediaRecorder.state === 'recording') {
       mediaRecorder.stop()
     }
@@ -112,10 +133,13 @@ const ClapDetector = ({ isListening, setIsListening, onClapDetected, onError, di
       
       const result = await response.json()
       
-      if (result.clapDetected && result.score > 0.6) {
+      if (result.clapDetected && result.score > 0.3) { // Lowered threshold for better sensitivity
         const now = Date.now()
         if (now - lastClapTime.current > 500) { // Prevent rapid-fire claps
           lastClapTime.current = now
+          setLastClapScore(result.score)
+          setShowClapFeedback(true)
+          setTimeout(() => setShowClapFeedback(false), 1000)
           debouncedClapDetected()
         }
       }
@@ -132,7 +156,17 @@ const ClapDetector = ({ isListening, setIsListening, onClapDetected, onError, di
 
   const toggleListening = () => {
     if (disabled) return
+    if (!isListening) {
+      setLastClapScore(null) // Reset score when starting
+      setShowClapFeedback(false) // Reset feedback when starting
+    }
     setIsListening(!isListening)
+  }
+
+  const testClapDetection = () => {
+    if (!disabled && !processingRef.current) {
+      onClapDetected()
+    }
   }
 
   return (
@@ -154,6 +188,18 @@ const ClapDetector = ({ isListening, setIsListening, onClapDetected, onError, di
         </div>
       </motion.button>
       
+      {isListening && (
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={testClapDetection}
+          disabled={disabled || isProcessing}
+          className="px-4 py-2 rounded-lg font-semibold text-white bg-yellow-600 hover:bg-yellow-700 shadow-lg shadow-yellow-500/50 transition-all duration-300"
+        >
+          Test Clap Detection
+        </motion.button>
+      )}
+      
       {isProcessing && (
         <div className="text-center">
           <div className="inline-flex items-center gap-2 text-blue-400">
@@ -163,10 +209,36 @@ const ClapDetector = ({ isListening, setIsListening, onClapDetected, onError, di
         </div>
       )}
       
+      {showClapFeedback && (
+        <motion.div
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0, opacity: 0 }}
+          className="text-center"
+        >
+          <div className="inline-flex items-center gap-2 text-green-400 text-lg font-semibold">
+            <span className="text-2xl">👏</span>
+            Clap Detected!
+          </div>
+        </motion.div>
+      )}
+      
       {isListening && (
         <div className="text-center text-sm text-gray-400">
           <p>Clap to decrease the countdown</p>
-          <p className="text-xs mt-1">Detection sensitivity: 60%</p>
+          <p className="text-xs mt-1">Detection sensitivity: 70%</p>
+          <div className="mt-2">
+            <div className="w-32 h-2 bg-gray-700 rounded-full mx-auto">
+              <div 
+                className="h-2 bg-green-400 rounded-full transition-all duration-100"
+                style={{ width: `${Math.min(audioLevel * 2, 100)}%` }}
+              />
+            </div>
+            <p className="text-xs mt-1">Audio Level: {Math.round(audioLevel)}</p>
+            {lastClapScore && (
+              <p className="text-xs mt-1 text-green-400">Last Clap Score: {(lastClapScore * 100).toFixed(1)}%</p>
+            )}
+          </div>
         </div>
       )}
     </div>

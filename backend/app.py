@@ -55,84 +55,71 @@ def extract_features(audio_path):
         return None
 
 def heuristic_clap_detection(features):
-    """Heuristic clap detection based on audio characteristics"""
-    try:
-        # Clap characteristics:
-        # - High energy (loud)
-        # - Moderate zero-crossing rate (not too noisy, not too clean)
-        # - High peak amplitude
-        # - Moderate spectral centroid (not too high frequency)
-        # - Moderate spectral bandwidth
-        
-        # Thresholds (can be tuned)
-        rms_threshold = 0.08
-        zcr_min = 0.03
-        zcr_max = 0.15
-        peak_threshold = -25
-        centroid_min = 1000
-        centroid_max = 4000
-        bandwidth_min = 500
-        bandwidth_max = 2000
-        
-        # Check each condition
-        conditions = []
-        
-        # Energy check
-        if features['rms_mean'] > rms_threshold:
-            conditions.append(True)
-            energy_score = min(features['rms_mean'] / 0.3, 1.0)
-        else:
-            conditions.append(False)
-            energy_score = 0.0
-        
-        # Zero-crossing rate check (claps have moderate ZCR)
-        if zcr_min <= features['zcr_mean'] <= zcr_max:
-            conditions.append(True)
-            zcr_score = 1.0 - abs(features['zcr_mean'] - (zcr_min + zcr_max) / 2) / ((zcr_max - zcr_min) / 2)
-        else:
-            conditions.append(False)
-            zcr_score = 0.0
-        
-        # Peak amplitude check
-        if features['peak_db'] > peak_threshold:
-            conditions.append(True)
-            peak_score = min((features['peak_db'] + 60) / 40, 1.0)
-        else:
-            conditions.append(False)
-            peak_score = 0.0
-        
-        # Spectral centroid check (claps have moderate brightness)
-        if centroid_min <= features['spectral_centroid_mean'] <= centroid_max:
-            conditions.append(True)
-            centroid_score = 1.0 - abs(features['spectral_centroid_mean'] - (centroid_min + centroid_max) / 2) / ((centroid_max - centroid_min) / 2)
-        else:
-            conditions.append(False)
-            centroid_score = 0.0
-        
-        # Spectral bandwidth check (claps have moderate frequency spread)
-        if bandwidth_min <= features['spectral_bandwidth_mean'] <= bandwidth_max:
-            conditions.append(True)
-            bandwidth_score = 1.0 - abs(features['spectral_bandwidth_mean'] - (bandwidth_min + bandwidth_max) / 2) / ((bandwidth_max - bandwidth_min) / 2)
-        else:
-            conditions.append(False)
-            bandwidth_score = 0.0
-        
-        # Determine if it's a clap
-        is_clap = sum(conditions) >= 3  # At least 3 out of 5 conditions must be met
-        
-        # Calculate confidence score
-        scores = [energy_score, zcr_score, peak_score, centroid_score, bandwidth_score]
-        confidence = np.mean(scores)
-        
-        # Boost confidence if more conditions are met
-        condition_boost = sum(conditions) / 5
-        confidence = (confidence + condition_boost) / 2
-        
-        return is_clap, confidence
-        
-    except Exception as e:
-        logger.error(f"Error in heuristic detection: {e}")
-        return False, 0.0
+    # Improved thresholds for better clap detection
+    rms_threshold = 0.05  # Lowered for better sensitivity
+    zcr_min = 0.02        # Lowered minimum ZCR
+    zcr_max = 0.20        # Increased maximum ZCR
+    peak_threshold = -30  # Lowered dB threshold for better sensitivity
+    centroid_min = 800    # Lowered minimum centroid
+    centroid_max = 5000   # Increased maximum centroid
+    bandwidth_min = 400   # Lowered minimum bandwidth
+    bandwidth_max = 2500  # Increased maximum bandwidth
+    
+    # Check each condition
+    conditions = []
+    
+    # Energy check
+    if features['rms_mean'] > rms_threshold:
+        conditions.append(True)
+        energy_score = min(features['rms_mean'] / 0.3, 1.0)
+    else:
+        conditions.append(False)
+        energy_score = 0.0
+    
+    # Zero-crossing rate check (claps have moderate ZCR)
+    if zcr_min <= features['zcr_mean'] <= zcr_max:
+        conditions.append(True)
+        zcr_score = 1.0 - abs(features['zcr_mean'] - (zcr_min + zcr_max) / 2) / ((zcr_max - zcr_min) / 2)
+    else:
+        conditions.append(False)
+        zcr_score = 0.0
+    
+    # Peak amplitude check
+    if features['peak_db'] > peak_threshold:
+        conditions.append(True)
+        peak_score = min((features['peak_db'] + 60) / 40, 1.0)
+    else:
+        conditions.append(False)
+        peak_score = 0.0
+    
+    # Spectral centroid check (claps have moderate brightness)
+    if centroid_min <= features['spectral_centroid_mean'] <= centroid_max:
+        conditions.append(True)
+        centroid_score = 1.0 - abs(features['spectral_centroid_mean'] - (centroid_min + centroid_max) / 2) / ((centroid_max - centroid_min) / 2)
+    else:
+        conditions.append(False)
+        centroid_score = 0.0
+    
+    # Spectral bandwidth check (claps have moderate frequency spread)
+    if bandwidth_min <= features['spectral_bandwidth_mean'] <= bandwidth_max:
+        conditions.append(True)
+        bandwidth_score = 1.0 - abs(features['spectral_bandwidth_mean'] - (bandwidth_min + bandwidth_max) / 2) / ((bandwidth_max - bandwidth_min) / 2)
+    else:
+        conditions.append(False)
+        bandwidth_score = 0.0
+    
+    # Determine if it's a clap - more lenient detection
+    is_clap = sum(conditions) >= 2  # At least 2 out of 5 conditions must be met
+    
+    # Calculate confidence score
+    scores = [energy_score, zcr_score, peak_score, centroid_score, bandwidth_score]
+    confidence = np.mean(scores)
+    
+    # Boost confidence if more conditions are met
+    condition_boost = sum(conditions) / 5
+    confidence = (confidence + condition_boost) / 2
+    
+    return is_clap, confidence
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -172,6 +159,7 @@ def detect_clap():
             logger.info(f"Features: RMS={features['rms_mean']:.3f}, ZCR={features['zcr_mean']:.3f}, "
                        f"Peak={features['peak_db']:.1f}dB, Centroid={features['spectral_centroid_mean']:.0f}Hz, "
                        f"Bandwidth={features['spectral_bandwidth_mean']:.0f}Hz")
+            logger.info(f"Conditions met: {sum(conditions)}/5, RMS threshold: {rms_threshold}, ZCR range: {zcr_min}-{zcr_max}")
             
             return jsonify({
                 "clapDetected": is_clap,
@@ -246,4 +234,4 @@ if __name__ == '__main__':
     logger.info("Using rule-based detection with audio feature analysis")
     
     # Run the app
-    app.run(host='0.0.0.0', port=8000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
